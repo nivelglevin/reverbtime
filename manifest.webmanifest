@@ -1,0 +1,16 @@
+{
+  "name": "Reverb Time Calculator",
+  "short_name": "Reverb Calc",
+  "description": "BPM-synced pre-delay and decay for any reverb.",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#090E14",
+  "theme_color": "#090E14",
+  "start_url": "./",
+  "scope": "./",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

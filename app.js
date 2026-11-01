@@ -1,0 +1,926 @@
+import { calculate, validateBpm, BPM_MIN, BPM_MAX } from './calc.js';
+import { BUILT_IN_PROFILES, DEFAULT_PROFILE, MAX_CUSTOM_PROFILES, createCustomProfile } from './profiles.js';
+import {
+  MAX_SONGS, MAX_FILE_BYTES, NOTES, FEELS, BEATS, cleanName, newId, sanitizeSong, sanitizeSongList,
+  sanitizeProfileList, buildBackup, parseBackup, mergeBackup,
+} from './store.js';
+
+const APP_VERSION = '1.1.0';
+const STORAGE_KEY = 'reverb-calc-v1';
+const TIP_KEY = 'reverb-calc-tip-dismissed';
+const CHIP_BPMS = [60, 72, 80, 90, 100, 110, 120, 130, 140];
+const DEFAULTS = {
+  bpm: '', profileId: DEFAULT_PROFILE.id, note: '1/32', feel: 'straight',
+  beats: '3', customMs: '', customBeats: '', units: 's', reduceGlass: false,
+  songs: [], customProfiles: [],
+  showStarting: true, loCut: '200', hiCut: '5', longTailWarn: '2', keepAwake: false,
+};
+
+const $ = (id) => document.getElementById(id);
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- storage (every call guarded: it can be blocked) ---------- */
+const LIMITS = { loCut: [20, 1000], hiCut: [1, 20], longTailWarn: [0.5, 20] };
+function validLimit(key, str) {
+  const n = parseNumber(str);
+  return n !== null && n >= LIMITS[key][0] && n <= LIMITS[key][1];
+}
+
+// Storage can be blocked (private mode, strict settings). Songs and units then live in memory only.
+const storageOk = (() => {
+  try {
+    localStorage.setItem('reverb-calc-probe', '1');
+    localStorage.removeItem('reverb-calc-probe');
+    return true;
+  } catch { return false; }
+})();
+
+function loadState() {
+  const state = { ...DEFAULTS, songs: [], customProfiles: [] };
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+    if (!saved || typeof saved !== 'object') return state;
+    state.songs = sanitizeSongList(saved.songs);
+    state.customProfiles = sanitizeProfileList(saved.customProfiles);
+    if ([...BUILT_IN_PROFILES, ...state.customProfiles].some((p) => p.id === saved.profileId)) state.profileId = saved.profileId;
+    if (typeof saved.showStarting === 'boolean') state.showStarting = saved.showStarting;
+    for (const key of Object.keys(LIMITS)) {
+      if (typeof saved[key] === 'string' && validLimit(key, saved[key])) state[key] = saved[key];
+    }
+    state.keepAwake = saved.keepAwake === true;
+    if (typeof saved.bpm === 'string' && saved.bpm.length <= 6) state.bpm = saved.bpm;
+    if (NOTES.includes(saved.note)) state.note = saved.note;
+    if (FEELS.includes(saved.feel)) state.feel = saved.feel;
+    if (BEATS.includes(saved.beats)) state.beats = saved.beats;
+    if (typeof saved.customMs === 'string' && saved.customMs.length <= 8) state.customMs = saved.customMs;
+    if (typeof saved.customBeats === 'string' && saved.customBeats.length <= 8) state.customBeats = saved.customBeats;
+    if (saved.units === 's' || saved.units === 'ms') state.units = saved.units;
+    state.reduceGlass = saved.reduceGlass === true;
+  } catch { /* storage blocked or corrupt: use defaults */ }
+  return state;
+}
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+}
+
+const state = loadState();
+
+/* ---------- helpers ---------- */
+function sanitizeNumber(raw) {
+  const cleaned = raw.replace(',', '.').replace(/[^0-9.]/g, '');
+  const dot = cleaned.indexOf('.');
+  return dot === -1 ? cleaned : cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, '');
+}
+function parseNumber(str) {
+  if (typeof str !== 'string' || str.trim() === '' || str === '.') return null;
+  const n = Number(str);
+  return Number.isFinite(n) ? n : null;
+}
+function decimalsOf(step) {
+  const s = String(step);
+  const dot = s.indexOf('.');
+  return dot === -1 ? 0 : s.length - dot - 1;
+}
+function trimmed(n, max = 2) {
+  return String(Number(n.toFixed(max)));
+}
+const allProfiles = () => [...BUILT_IN_PROFILES, ...state.customProfiles];
+function currentProfile() {
+  return allProfiles().find((p) => p.id === state.profileId) || DEFAULT_PROFILE;
+}
+
+/* ---------- compute everything the screen needs ---------- */
+function compute() {
+  const profile = currentProfile();
+  const bpmCheck = validateBpm(state.bpm);
+  if (!bpmCheck.ok) {
+    return { status: state.bpm.trim() === '' ? 'empty' : 'invalid', reason: bpmCheck.reason, profile };
+  }
+  let customMs = null;
+  let preValid = true;
+  if (state.note === 'custom') {
+    customMs = parseNumber(state.customMs);
+    preValid = customMs !== null && customMs >= 0;
+  }
+  let beats = state.beats === 'custom' ? parseNumber(state.customBeats) : Number(state.beats);
+  const beatsValid = beats !== null && calculate({ bpm: 120, beats }).ok;
+
+  const r = calculate({
+    bpm: bpmCheck.bpm,
+    fraction: preValid ? state.note : '1/32',
+    feel: state.feel,
+    customMs: preValid ? customMs : undefined,
+    beats: beatsValid ? beats : 3,
+    profile,
+    longTailWarnS: Number(state.longTailWarn),
+  });
+  if (!r.ok) return { status: 'invalid', reason: r.reason, profile };
+  return { status: 'ok', r, preValid, beatsValid, profile };
+}
+
+function formatPreDelay(r, profile) {
+  const decimals = profile.id === 'generic' ? 0 : decimalsOf(profile.preDelay.stepMs);
+  return r.preDelay.msRounded.toFixed(decimals);
+}
+function formatDecay(r, profile) {
+  if (state.units === 'ms') return String(Math.round(r.decay.sRounded * 1000));
+  return r.decay.sRounded.toFixed(Math.max(2, decimalsOf(profile.decay.stepS)));
+}
+
+/* ---------- render ---------- */
+let lastCopy = null;
+
+function setText(el, text) {
+  if (el.textContent === text) return;
+  el.textContent = text;
+  if (!reducedMotion() && el.animate) el.animate([{ opacity: 0.35 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
+}
+
+function render() {
+  const profile = currentProfile();
+  const c = compute();
+
+  // profile note + badge
+  $('profile-badge').hidden = profile.verified;
+  $('profile-notes').textContent = profile.notes;
+
+  // chips
+  const bpmNum = parseNumber(state.bpm);
+  document.querySelectorAll('.chip').forEach((chip) => {
+    chip.setAttribute('aria-pressed', String(bpmNum === Number(chip.dataset.bpm)));
+  });
+
+  // options
+  setSeg('seg-note', 'note', state.note);
+  setSeg('seg-feel', 'feel', state.feel);
+  setSeg('seg-beats', 'beats', state.beats);
+  setSeg('seg-units', 'units', state.units);
+  $('custom-ms-wrap').hidden = state.note !== 'custom';
+  $('custom-beats-wrap').hidden = state.beats !== 'custom';
+  const feelOff = state.note === 'custom';
+  $('opt-feel').classList.toggle('is-off', feelOff);
+  document.querySelectorAll('input[name="feel"]').forEach((i) => { i.disabled = feelOff; });
+  $('note-hint').textContent = {
+    '1/64': 'Very tight', '1/32': 'Tight – best for live vocals', '1/16': 'Roomy', custom: '',
+  }[state.note];
+
+  const msg = $('bpm-msg');
+  msg.classList.remove('error');
+  const warnings = [];
+  lastCopy = null;
+
+  if (c.status !== 'ok') {
+    // The empty hint lives in the card so the first screen doesn't grow by a line.
+    msg.textContent = c.status === 'empty' ? '' : c.reason;
+    if (c.status === 'invalid') msg.classList.add('error');
+    setText($('pre-num'), '–');
+    setText($('dec-num'), '–');
+    $('dec-unit').textContent = state.units;
+    $('pre-sub').textContent = c.status === 'empty' ? 'Type a BPM or tap the tempo.' : 'Waiting for a BPM.';
+    $('dec-sub').textContent = 'Waiting for a BPM.';
+  } else {
+    msg.textContent = '';
+    const { r } = c;
+    const bpmText = trimmed(r.bpm);
+
+    // pre-delay
+    if (c.preValid) {
+      const preText = formatPreDelay(r, profile);
+      setText($('pre-num'), preText);
+      const word = state.note === 'custom'
+        ? 'Custom pre-delay'
+        : `${r.preDelay.feel === 'straight' ? '' : cap(r.preDelay.feel) + ' '}${r.preDelay.fraction} note at ${bpmText} BPM`;
+      const exact = state.note === 'custom' ? '' : ` · exact ${trimmed(r.preDelay.ms)} ms`;
+      setSub($('pre-sub'), word + exact, r.preDelay.clamped);
+      if (r.preDelay.clamped) {
+        const dir = r.preDelay.original > r.preDelay.msRounded ? 'higher' : 'lower';
+        warnings.push({ text: `Capped to ${preText} ms – this device can't go ${dir}.` });
+      }
+      lastCopy = { pre: `${preText} ms` };
+    } else {
+      setText($('pre-num'), '–');
+      $('pre-sub').textContent = 'Type a pre-delay in ms under Options.';
+    }
+
+    // decay
+    if (c.beatsValid) {
+      const decText = formatDecay(r, profile);
+      setText($('dec-num'), decText);
+      $('dec-unit').textContent = state.units;
+      const beatsN = r.decay.beats;
+      const exactS = Math.abs(r.decay.s - r.decay.sRounded) > 0.0005 ? ` · exact ${trimmed(r.decay.s, 3)} s` : '';
+      setSub($('dec-sub'), `${trimmed(beatsN)} ${beatsN === 1 ? 'beat' : 'beats'} at ${bpmText} BPM${exactS}`, r.decay.clamped);
+      if (r.decay.clamped) {
+        const dir = r.decay.original > r.decay.sRounded ? 'higher' : 'lower';
+        warnings.push({ text: `Capped to ${decText} ${state.units} – this device can't go ${dir}.` });
+      }
+      if (r.decay.longTail) {
+        warnings.push({ text: 'Long tail for a reverberant room. Try 2 beats, or keep the return fader low.' });
+      }
+      lastCopy = { ...(lastCopy || {}), dec: `${decText} ${state.units}` };
+    } else {
+      setText($('dec-num'), '–');
+      $('dec-unit').textContent = state.units;
+      $('dec-sub').textContent = 'Type beats from 0.5 to 8, in halves, under Options.';
+    }
+  }
+
+  // warnings
+  const box = $('warnings');
+  box.textContent = '';
+  for (const w of warnings) {
+    const div = document.createElement('div');
+    div.className = 'banner card';
+    const dot = document.createElement('i');
+    dot.className = 'dot';
+    dot.setAttribute('aria-hidden', 'true');
+    const p = document.createElement('p');
+    p.style.margin = '0';
+    p.textContent = w.text;
+    div.append(dot, p);
+    box.append(div);
+  }
+
+  // copy buttons
+  $('copy-pre').disabled = !(lastCopy && lastCopy.pre);
+  $('copy-dec').disabled = !(lastCopy && lastCopy.dec);
+  $('copy-both').disabled = !(lastCopy && lastCopy.pre && lastCopy.dec);
+  document.querySelectorAll('.icon-btn:disabled, .btn:disabled').forEach((b) => { b.style.opacity = '0.4'; });
+  document.querySelectorAll('.icon-btn:not(:disabled), .btn:not(:disabled)').forEach((b) => { b.style.opacity = ''; });
+
+  // reduce glass
+  document.documentElement.classList.toggle('reduce-glass', state.reduceGlass);
+  $('glass-switch').setAttribute('aria-checked', String(state.reduceGlass));
+  renderExtras();
+}
+
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function setSub(el, text, clamped) {
+  el.textContent = text;
+  if (clamped) {
+    const span = document.createElement('span');
+    span.className = 'cap';
+    span.textContent = ' · capped';
+    el.append(span);
+  }
+}
+
+function setSeg(id, name, value) {
+  const seg = $(id);
+  const inputs = [...seg.querySelectorAll(`input[name="${name}"]`)];
+  const idx = Math.max(0, inputs.findIndex((i) => i.value === value));
+  inputs.forEach((i, n) => { i.checked = n === idx; });
+  seg.style.setProperty('--i', String(idx));
+}
+
+/* ---------- BPM input ---------- */
+function setBpm(value) {
+  state.bpm = value;
+  const input = $('bpm');
+  if (input.value !== value) input.value = value;
+  saveState();
+  render();
+}
+
+$('bpm').addEventListener('input', (e) => {
+  const clean = sanitizeNumber(e.target.value);
+  if (clean !== e.target.value) e.target.value = clean;
+  resetTaps();
+  state.bpm = clean;
+  saveState();
+  render();
+});
+$('bpm').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+$('bpm').addEventListener('focus', (e) => e.target.select());
+
+function stepBpm(delta) {
+  const cur = parseNumber(state.bpm);
+  let next = cur === null ? 120 : cur + delta;
+  next = Math.min(BPM_MAX, Math.max(BPM_MIN, next));
+  resetTaps();
+  setBpm(String(Number(next.toFixed(1))));
+}
+
+// Press and hold repeats; keyboard activation (click with detail 0) steps once.
+function holdRepeat(btn, delta) {
+  let delay = null;
+  let timer = null;
+  const stop = () => { clearTimeout(delay); clearInterval(timer); delay = timer = null; };
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    stepBpm(delta);
+    delay = setTimeout(() => { timer = setInterval(() => stepBpm(delta), 80); }, 450);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((ev) => btn.addEventListener(ev, stop));
+  btn.addEventListener('click', (e) => { if (e.detail === 0) stepBpm(delta); });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+holdRepeat($('bpm-minus'), -1);
+holdRepeat($('bpm-plus'), 1);
+
+/* ---------- tap tempo ---------- */
+let taps = [];
+function resetTaps() {
+  taps = [];
+  $('tap-bpm').hidden = true;
+}
+const buzz = () => { try { navigator.vibrate?.(10); } catch { /* not supported */ } };
+
+$('tap').addEventListener('click', () => {
+  buzz();
+  const now = performance.now();
+  if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
+  taps.push(now);
+  taps = taps.slice(-6);
+  if (taps.length < 2) return;
+  const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+  const bpm = Math.round((60000 / avg) * 2) / 2;
+  $('tap-bpm').textContent = trimmed(bpm, 1);
+  $('tap-bpm').hidden = false;
+  setBpm(String(bpm));
+});
+
+$('reset').addEventListener('click', () => {
+  resetTaps();
+  Object.assign(state, { bpm: '', note: '1/32', feel: 'straight', beats: '3', customMs: '', customBeats: '' });
+  $('bpm').value = '';
+  $('custom-ms').value = '';
+  $('custom-beats').value = '';
+  saveState();
+  render();
+});
+
+/* ---------- chips ---------- */
+const chipBox = $('chips');
+for (const n of CHIP_BPMS) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip';
+  b.dataset.bpm = String(n);
+  b.textContent = String(n);
+  b.setAttribute('aria-pressed', 'false');
+  b.addEventListener('click', () => { resetTaps(); setBpm(String(n)); });
+  chipBox.append(b);
+}
+
+/* ---------- profile ---------- */
+const sel = $('profile');
+function populateProfiles() {
+  sel.textContent = '';
+  for (const p of allProfiles()) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.append(o);
+  }
+  if (!allProfiles().some((p) => p.id === state.profileId)) state.profileId = DEFAULT_PROFILE.id;
+  sel.value = state.profileId;
+}
+populateProfiles();
+sel.addEventListener('change', () => { state.profileId = sel.value; saveState(); render(); });
+
+/* ---------- options ---------- */
+function onRadio(name, key) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach((i) => {
+    i.addEventListener('change', () => { if (i.checked) { state[key] = i.value; saveState(); render(); } });
+  });
+}
+onRadio('note', 'note');
+onRadio('feel', 'feel');
+onRadio('beats', 'beats');
+onRadio('units', 'units');
+
+function bindNumberField(id, key) {
+  const el = $(id);
+  el.value = state[key];
+  el.addEventListener('input', () => {
+    const clean = sanitizeNumber(el.value);
+    if (clean !== el.value) el.value = clean;
+    state[key] = clean;
+    saveState();
+    render();
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+}
+bindNumberField('custom-ms', 'customMs');
+bindNumberField('custom-beats', 'customBeats');
+
+/* ---------- copy ---------- */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the old method */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
+  document.body.append(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+function flashCopied(btn, label) {
+  btn.classList.add('is-copied');
+  const prev = label ? label.textContent : null;
+  if (label) label.textContent = 'Copied';
+  setTimeout(() => {
+    btn.classList.remove('is-copied');
+    if (label) label.textContent = prev;
+  }, 1400);
+}
+
+function wireCopy(btnId, getText, labelEl) {
+  const btn = $(btnId);
+  btn.addEventListener('click', async () => {
+    const text = getText();
+    if (!text) return;
+    if (await copyText(text)) { buzz(); flashCopied(btn, labelEl); }
+  });
+}
+wireCopy('copy-pre', () => lastCopy && lastCopy.pre);
+wireCopy('copy-dec', () => lastCopy && lastCopy.dec);
+wireCopy('copy-both', () => (lastCopy && lastCopy.pre && lastCopy.dec ? `Pre-Delay ${lastCopy.pre} | Decay ${lastCopy.dec}` : null), $('copy-both-label'));
+
+/* ---------- settings ---------- */
+function bindSwitch(id, key) {
+  $(id).addEventListener('click', () => { state[key] = !state[key]; saveState(); render(); });
+}
+bindSwitch('glass-switch', 'reduceGlass');
+bindSwitch('starting-switch', 'showStarting');
+
+function bindLimit(id, key) {
+  const el = $(id);
+  el.addEventListener('input', () => {
+    const clean = sanitizeNumber(el.value);
+    if (clean !== el.value) el.value = clean;
+    const ok = validLimit(key, clean);
+    el.setAttribute('aria-invalid', String(!ok));
+    if (ok) { state[key] = clean; saveState(); render(); }
+  });
+  el.addEventListener('blur', () => { el.value = state[key]; el.setAttribute('aria-invalid', 'false'); });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+}
+bindLimit('locut', 'loCut');
+bindLimit('hicut', 'hiCut');
+bindLimit('longtail', 'longTailWarn');
+
+function setIfIdle(id, value) {
+  const el = $(id);
+  if (document.activeElement !== el && el.value !== value) el.value = value;
+}
+
+function renderExtras() {
+  $('also-card').hidden = !state.showStarting;
+  $('starting-switch').setAttribute('aria-checked', String(state.showStarting));
+  setIfIdle('locut', state.loCut);
+  setIfIdle('hicut', state.hiCut);
+  setIfIdle('longtail', state.longTailWarn);
+  $('wake-switch').setAttribute('aria-checked', String(state.keepAwake));
+  $('storage-note').hidden = storageOk;
+  const canSave = validateBpm(state.bpm).ok && state.songs.length < MAX_SONGS;
+  $('save-song').disabled = !canSave;
+  $('save-song').style.opacity = canSave ? '' : '0.4';
+}
+
+/* ---------- keep screen awake ---------- */
+let wakeLock = null;
+async function acquireWake() {
+  if (!('wakeLock' in navigator) || wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+    $('wake-msg').textContent = '';
+  } catch {
+    wakeLock = null;
+    state.keepAwake = false;
+    saveState();
+    render();
+    $('wake-msg').textContent = "This device wouldn't keep the screen awake.";
+  }
+}
+async function releaseWake() {
+  try { await wakeLock?.release(); } catch { /* already released */ }
+  wakeLock = null;
+}
+if ('wakeLock' in navigator) {
+  $('wake-row').hidden = false;
+  $('wake-switch').addEventListener('click', () => {
+    state.keepAwake = !state.keepAwake;
+    saveState();
+    render();
+    if (state.keepAwake) acquireWake(); else releaseWake();
+  });
+  // The browser drops the lock when the tab is hidden, so take it again on return.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.keepAwake) acquireWake();
+  });
+  if (state.keepAwake) acquireWake();
+}
+
+/* ---------- small helpers for the lists ---------- */
+const SVG_OPEN = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">';
+const ICONS = {
+  pencil: '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14.5 7.5l3 3"/>',
+  trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10 11v5M14 11v5"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M7 7l10 10M17 7L7 17"/>',
+};
+function iconButton(icon, label, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'icon-btn';
+  b.setAttribute('aria-label', label);
+  b.innerHTML = `${SVG_OPEN}${ICONS[icon]}</svg>`; // static markup only, no user text
+  b.addEventListener('click', onClick);
+  return b;
+}
+// Delete takes two taps: the first turns the button into "Delete?" for three seconds.
+let pendingDelete = null;
+let pendingTimer = null;
+function armDelete(key, rerender) {
+  pendingDelete = key;
+  clearTimeout(pendingTimer);
+  pendingTimer = setTimeout(() => { pendingDelete = null; rerender(); }, 3000);
+  rerender();
+}
+function deleteButton(key, name, rerender, onConfirm) {
+  const armed = pendingDelete === key;
+  const b = iconButton('trash', armed ? `Confirm delete ${name}` : `Delete ${name}`, () => {
+    if (pendingDelete === key) { pendingDelete = null; clearTimeout(pendingTimer); onConfirm(); } else armDelete(key, rerender);
+  });
+  if (armed) { b.classList.add('confirming'); b.textContent = 'Delete?'; }
+  return b;
+}
+
+/* ---------- saved songs ---------- */
+let editingSongId = null;
+const songStatus = (text) => { $('songs-status').textContent = text; };
+
+function songSummary(s) {
+  const p = allProfiles().find((x) => x.id === s.profileId);
+  const note = s.note === 'custom'
+    ? `${s.customMs || '?'} ms pre-delay`
+    : `${s.feel === 'straight' ? '' : s.feel + ' '}${s.note}`;
+  const beats = `${s.beats === 'custom' ? (s.customBeats || '?') : s.beats} beats`;
+  return `${s.bpm} BPM · ${note} · ${beats} · ${p ? p.name : 'Generic'}`;
+}
+
+function renderSongs() {
+  const list = $('song-list');
+  list.textContent = '';
+  $('songs-empty').hidden = state.songs.length > 0;
+  for (const s of state.songs) {
+    const li = document.createElement('li');
+    if (editingSongId === s.id) {
+      li.append(songEditRow(s));
+    } else {
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.className = 'row-main';
+      const t = document.createElement('span');
+      t.className = 'row-title';
+      t.textContent = s.name;
+      const sub = document.createElement('span');
+      sub.className = 'row-sub';
+      sub.textContent = songSummary(s);
+      main.append(t, sub);
+      main.setAttribute('aria-label', `Load ${s.name}`);
+      main.addEventListener('click', () => loadSong(s));
+      li.append(
+        main,
+        iconButton('pencil', `Rename ${s.name}`, () => { editingSongId = s.id; renderSongs(); }),
+        deleteButton(s.id, s.name, renderSongs, () => deleteSong(s)),
+      );
+    }
+    list.append(li);
+  }
+}
+
+function songEditRow(s) {
+  const wrap = document.createElement('div');
+  wrap.className = 'edit-row';
+  const input = document.createElement('input');
+  input.className = 'field';
+  input.type = 'text';
+  input.maxLength = 40;
+  input.value = s.name;
+  input.setAttribute('aria-label', `New name for ${s.name}`);
+  const commit = () => {
+    const name = cleanName(input.value);
+    if (!name) { input.setAttribute('aria-invalid', 'true'); return; }
+    s.name = name;
+    editingSongId = null;
+    saveState();
+    renderSongs();
+    songStatus('Renamed.');
+  };
+  const cancel = () => { editingSongId = null; renderSongs(); };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') cancel();
+  });
+  wrap.append(input, iconButton('check', 'Save name', commit), iconButton('x', 'Cancel rename', cancel));
+  queueMicrotask(() => input.focus());
+  return wrap;
+}
+
+function loadSong(s) {
+  const known = allProfiles().some((p) => p.id === s.profileId);
+  Object.assign(state, {
+    bpm: s.bpm, note: s.note, feel: s.feel, beats: s.beats, customMs: s.customMs, customBeats: s.customBeats,
+    profileId: known ? s.profileId : DEFAULT_PROFILE.id,
+  });
+  $('bpm').value = state.bpm;
+  $('custom-ms').value = state.customMs;
+  $('custom-beats').value = state.customBeats;
+  sel.value = state.profileId;
+  resetTaps();
+  saveState();
+  render();
+  songStatus(known ? `Loaded “${s.name}”.` : `Loaded “${s.name}”. Its reverb unit was deleted, so Generic is selected.`);
+  window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
+}
+
+function deleteSong(s) {
+  state.songs = state.songs.filter((x) => x.id !== s.id);
+  saveState();
+  renderSongs();
+  renderExtras();
+  songStatus(`Deleted “${s.name}”.`);
+}
+
+$('save-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (state.songs.length >= MAX_SONGS) { songStatus(`You can keep up to ${MAX_SONGS} songs. Delete one to save another.`); return; }
+  const name = cleanName($('song-name').value) || 'Untitled';
+  const song = sanitizeSong({
+    name, bpm: state.bpm, profileId: state.profileId, note: state.note, feel: state.feel, beats: state.beats,
+    customMs: state.customMs, customBeats: state.customBeats,
+  });
+  if (!song) { songStatus('Enter a BPM first.'); return; }
+  state.songs.push(song);
+  $('song-name').value = '';
+  saveState();
+  renderSongs();
+  renderExtras();
+  songStatus(`Saved “${song.name}”.`);
+});
+
+/* ---------- my reverb units ---------- */
+let editingUnitId = null; // null = form closed, 'new' = adding, otherwise the id being edited
+const unitFields = {
+  name: $('unit-name'), preMin: $('u-pre-min'), preMax: $('u-pre-max'), preStep: $('u-pre-step'),
+  decMin: $('u-dec-min'), decMax: $('u-dec-max'), decStep: $('u-dec-step'),
+};
+
+function unitSummary(p) {
+  return `Pre-delay ${p.preDelay.minMs}–${p.preDelay.maxMs} ms, step ${p.preDelay.stepMs} · Decay ${p.decay.minS}–${p.decay.maxS} s, step ${p.decay.stepS}`;
+}
+
+function renderUnits() {
+  const list = $('unit-list');
+  list.textContent = '';
+  for (const p of state.customProfiles) {
+    const li = document.createElement('li');
+    const main = document.createElement('div');
+    main.className = 'row-main';
+    const t = document.createElement('span');
+    t.className = 'row-title';
+    t.textContent = p.name;
+    const sub = document.createElement('span');
+    sub.className = 'row-sub';
+    sub.textContent = unitSummary(p);
+    main.append(t, sub);
+    li.append(
+      main,
+      iconButton('pencil', `Edit ${p.name}`, () => openUnitForm(p)),
+      deleteButton(p.id, p.name, renderUnits, () => deleteUnit(p)),
+    );
+    list.append(li);
+  }
+  const full = state.customProfiles.length >= MAX_CUSTOM_PROFILES;
+  $('unit-add').disabled = full;
+  $('unit-add').style.opacity = full ? '0.4' : '';
+  $('unit-add').hidden = editingUnitId !== null;
+}
+
+function openUnitForm(p) {
+  const base = p || { name: '', preDelay: { minMs: 0, maxMs: 500, stepMs: 0.1 }, decay: { minS: 0.1, maxS: 20, stepS: 0.01 } };
+  editingUnitId = p ? p.id : 'new';
+  unitFields.name.value = base.name;
+  unitFields.preMin.value = String(base.preDelay.minMs);
+  unitFields.preMax.value = String(base.preDelay.maxMs);
+  unitFields.preStep.value = String(base.preDelay.stepMs);
+  unitFields.decMin.value = String(base.decay.minS);
+  unitFields.decMax.value = String(base.decay.maxS);
+  unitFields.decStep.value = String(base.decay.stepS);
+  $('unit-error').textContent = '';
+  $('unit-form').hidden = false;
+  $('unit-add').hidden = true;
+  unitFields.name.focus();
+}
+
+function closeUnitForm() {
+  editingUnitId = null;
+  $('unit-form').hidden = true;
+  $('unit-add').hidden = false;
+  renderUnits();
+}
+
+function deleteUnit(p) {
+  state.customProfiles = state.customProfiles.filter((x) => x.id !== p.id);
+  if (state.profileId === p.id) state.profileId = DEFAULT_PROFILE.id;
+  saveState();
+  populateProfiles();
+  renderUnits();
+  render();
+}
+
+$('unit-add').addEventListener('click', () => {
+  if (state.customProfiles.length >= MAX_CUSTOM_PROFILES) return;
+  openUnitForm(null);
+});
+$('unit-cancel').addEventListener('click', closeUnitForm);
+$('unit-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (editingUnitId === null) return;
+  // Read the raw text (no cleanup) so "-1" is reported, not quietly turned into "1".
+  const num = (el) => {
+    const t = el.value.trim().replace(',', '.');
+    return t === '' ? NaN : Number(t);
+  };
+  const isNew = editingUnitId === 'new';
+  if (isNew && state.customProfiles.length >= MAX_CUSTOM_PROFILES) {
+    $('unit-error').textContent = `You can keep up to ${MAX_CUSTOM_PROFILES} units.`;
+    return;
+  }
+  const made = createCustomProfile({
+    id: isNew ? newId('custom') : editingUnitId,
+    name: cleanName(unitFields.name.value),
+    preDelay: { minMs: num(unitFields.preMin), maxMs: num(unitFields.preMax), stepMs: num(unitFields.preStep) },
+    decay: { minS: num(unitFields.decMin), maxS: num(unitFields.decMax), stepS: num(unitFields.decStep) },
+  });
+  if (!made.ok) { $('unit-error').textContent = made.reason; return; }
+  if (isNew) {
+    state.customProfiles.push(made.profile);
+    state.profileId = made.profile.id;
+  } else {
+    state.customProfiles = state.customProfiles.map((x) => (x.id === made.profile.id ? made.profile : x));
+  }
+  saveState();
+  populateProfiles();
+  closeUnitForm();
+  render();
+});
+
+/* ---------- export and import ---------- */
+const backupMsg = (text) => { $('backup-msg').textContent = text; };
+let pendingImport = null;
+
+$('export-btn').addEventListener('click', () => {
+  if (!state.songs.length && !state.customProfiles.length) { backupMsg('Nothing to export yet. Save a song or add a unit first.'); return; }
+  const blob = new Blob([JSON.stringify(buildBackup({ songs: state.songs, profiles: state.customProfiles }), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'reverb-calc-backup.json';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  backupMsg(`Backup file created with ${state.songs.length} song${state.songs.length === 1 ? '' : 's'} and ${state.customProfiles.length} unit${state.customProfiles.length === 1 ? '' : 's'}.`);
+});
+
+$('import-btn').addEventListener('click', () => $('import-file').click());
+$('import-file').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  $('import-confirm').hidden = true;
+  pendingImport = null;
+  if (!file) return;
+  if (file.size > MAX_FILE_BYTES) { backupMsg('That file is too big to be a backup from this app.'); return; }
+  let text;
+  try { text = await file.text(); } catch { backupMsg("That file couldn't be read."); return; }
+  const result = parseBackup(text);
+  if (!result.ok) { backupMsg(result.reason); return; }
+  pendingImport = result;
+  const n = result.songs.length;
+  const u = result.profiles.length;
+  const skipped = result.dropped ? ` ${result.dropped} item${result.dropped === 1 ? '' : 's'} in the file couldn't be used and will be left out.` : '';
+  $('import-confirm-text').textContent = `This file has ${n} song${n === 1 ? '' : 's'} and ${u} custom unit${u === 1 ? '' : 's'}.${skipped} Add them to what you have now, or replace everything you have now?`;
+  backupMsg('');
+  $('import-confirm').hidden = false;
+  $('import-add').focus();
+});
+
+function finishImport(merged, text) {
+  state.songs = merged.songs;
+  state.customProfiles = merged.profiles;
+  saveState();
+  populateProfiles();
+  renderSongs();
+  renderUnits();
+  render();
+  pendingImport = null;
+  $('import-confirm').hidden = true;
+  backupMsg(text);
+}
+$('import-add').addEventListener('click', () => {
+  if (!pendingImport) return;
+  const m = mergeBackup({ songs: state.songs, profiles: state.customProfiles }, pendingImport);
+  const skipped = m.skipped ? ` ${m.skipped} didn't fit within the limits and were left out.` : '';
+  finishImport(m, `Added ${m.addedSongs} song${m.addedSongs === 1 ? '' : 's'} and ${m.addedProfiles} unit${m.addedProfiles === 1 ? '' : 's'}.${skipped}`);
+});
+$('import-replace').addEventListener('click', () => {
+  if (!pendingImport) return;
+  const m = mergeBackup({ songs: [], profiles: [] }, pendingImport);
+  finishImport(m, `Replaced with ${m.addedSongs} song${m.addedSongs === 1 ? '' : 's'} and ${m.addedProfiles} unit${m.addedProfiles === 1 ? '' : 's'}.`);
+});
+$('import-cancel').addEventListener('click', () => {
+  pendingImport = null;
+  $('import-confirm').hidden = true;
+  backupMsg('Import cancelled. Nothing was changed.');
+});
+
+/* ---------- start ---------- */
+$('bpm').value = state.bpm;
+renderSongs();
+renderUnits();
+// The thumb should not slide in from the left on first paint.
+document.querySelectorAll('.seg .thumb').forEach((t) => { t.style.transition = 'none'; });
+render();
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  document.querySelectorAll('.seg .thumb').forEach((t) => { t.style.transition = ''; });
+}));
+
+/* ---------- version, install hint, offline and updates ---------- */
+$('version').textContent = `Version ${APP_VERSION}`;
+
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function tipDismissed() {
+  try { return localStorage.getItem(TIP_KEY) === '1'; } catch { return false; }
+}
+function showTip(text, withInstall) {
+  if (isStandalone() || tipDismissed()) return;
+  $('install-text').textContent = text;
+  $('install-btn').hidden = !withInstall;
+  $('install-tip').hidden = false;
+}
+$('install-close').addEventListener('click', () => {
+  $('install-tip').hidden = true;
+  try { localStorage.setItem(TIP_KEY, '1'); } catch { /* ignore */ }
+});
+
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvent = e;
+  showTip('Install this app to use it offline from your home screen.', true);
+});
+$('install-btn').addEventListener('click', async () => {
+  if (!installEvent) return;
+  installEvent.prompt();
+  try { await installEvent.userChoice; } catch { /* ignore */ }
+  installEvent = null;
+  $('install-tip').hidden = true;
+});
+window.addEventListener('appinstalled', () => { $('install-tip').hidden = true; });
+if (isIos()) showTip('To install: tap Share, then Add to Home Screen.', false);
+
+if ('serviceWorker' in navigator) {
+  let reloading = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // First install also fires this; only reload when an older version was running.
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+
+  const offerUpdate = (worker) => {
+    const bar = $('update-bar');
+    bar.hidden = false;
+    bar.onclick = () => worker.postMessage('SKIP_WAITING');
+  };
+
+  navigator.serviceWorker.register('./sw.js').then((reg) => {
+    if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const worker = reg.installing;
+      if (!worker) return;
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(worker);
+      });
+    });
+  }).catch(() => { /* offline support unavailable; the app still works online */ });
+}

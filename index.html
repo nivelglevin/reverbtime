@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090E14">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Reverb Calc">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <title>Reverb Time Calculator</title>
+  <meta name="description" content="BPM-synced pre-delay and decay for any reverb.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <main class="app">
+    <header class="head">
+      <h1>Reverb Time Calculator</h1>
+      <p class="subtitle">BPM-synced pre-delay and decay for any reverb</p>
+    </header>
+
+    <div class="screen">
+      <section class="block profile" aria-label="Reverb unit">
+        <label class="label" for="profile">My reverb unit</label>
+        <div class="select-wrap">
+          <select id="profile" class="select"></select>
+          <svg class="chev" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <p class="profile-note" id="profile-note"><span class="badge" id="profile-badge" hidden><i class="dot" aria-hidden="true"></i>Verify on your console</span><span id="profile-notes"></span></p>
+      </section>
+
+      <section class="block bpm" aria-label="Tempo">
+        <div class="bpm-row">
+          <button type="button" class="round" id="bpm-minus" aria-label="Lower BPM by 1">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M6 12h12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+          </button>
+          <div class="bpm-field">
+            <input id="bpm" class="bpm-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="–" aria-describedby="bpm-msg" maxlength="6">
+            <label class="bpm-label" for="bpm">BPM</label>
+          </div>
+          <button type="button" class="round" id="bpm-plus" aria-label="Raise BPM by 1">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 6v12M6 12h12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <p class="msg" id="bpm-msg" aria-live="polite"></p>
+        <div class="bpm-actions">
+          <button type="button" class="btn primary" id="tap"><span>Tap tempo</span><span class="tap-bpm" id="tap-bpm" hidden></span></button>
+          <button type="button" class="btn secondary" id="reset">Reset</button>
+        </div>
+        <div class="chips" id="chips" role="group" aria-label="Common tempos"></div>
+      </section>
+
+      <section class="results" aria-label="Results">
+        <article class="card result" aria-labelledby="pre-label">
+          <div class="result-head">
+            <h2 class="label" id="pre-label">Pre-delay</h2>
+            <button type="button" class="icon-btn" id="copy-pre" aria-label="Copy pre-delay">
+              <svg class="i-copy" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 15V7a3 3 0 0 1 3-3h8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+              <svg class="i-check" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <p class="value" id="pre-value" aria-live="polite" aria-atomic="true"><span class="num" id="pre-num">–</span><span class="unit" id="pre-unit">ms</span></p>
+          <p class="sub" id="pre-sub">Enter a BPM to start.</p>
+        </article>
+
+        <article class="card result" aria-labelledby="dec-label">
+          <div class="result-head">
+            <h2 class="label" id="dec-label">Decay</h2>
+            <div class="seg seg-mini" role="radiogroup" aria-label="Decay units" id="seg-units" style="--n:2;--i:0">
+              <span class="thumb" aria-hidden="true"></span>
+              <label><input type="radio" name="units" value="s" checked><span>s</span></label>
+              <label><input type="radio" name="units" value="ms"><span>ms</span></label>
+            </div>
+            <button type="button" class="icon-btn" id="copy-dec" aria-label="Copy decay">
+              <svg class="i-copy" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 15V7a3 3 0 0 1 3-3h8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+              <svg class="i-check" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <p class="value" id="dec-value" aria-live="polite" aria-atomic="true"><span class="num" id="dec-num">–</span><span class="unit" id="dec-unit">s</span></p>
+          <p class="sub" id="dec-sub">Enter a BPM to start.</p>
+        </article>
+
+        <button type="button" class="btn primary wide" id="copy-both">
+          <svg class="i-copy" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 15V7a3 3 0 0 1 3-3h8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+          <svg class="i-check" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="copy-both-label">Copy both</span>
+        </button>
+      </section>
+    </div>
+
+    <div class="below">
+      <div class="warnings" id="warnings" aria-live="polite"></div>
+
+      <section class="card also" id="also-card" aria-labelledby="also-title" hidden>
+        <div class="also-head">
+          <h2 class="label" id="also-title">Also set</h2>
+          <p class="caption">Starting points – tune by ear</p>
+        </div>
+        <div class="also-grid">
+          <div class="also-item">
+            <label class="label" for="locut">Lo cut</label>
+            <div class="inline"><input id="locut" class="field" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off"><span class="suffix">Hz</span></div>
+            <p class="hint">Keeps low thuds out of the reverb</p>
+          </div>
+          <div class="also-item">
+            <label class="label" for="hicut">Hi cut</label>
+            <div class="inline"><input id="hicut" class="field" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off"><span class="suffix">kHz</span></div>
+            <p class="hint">Softens harsh S and T</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card options" aria-label="Options">
+        <div class="opt">
+          <span class="label" id="lbl-note">Pre-delay note</span>
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-note" id="seg-note" style="--n:4;--i:1">
+            <span class="thumb" aria-hidden="true"></span>
+            <label><input type="radio" name="note" value="1/64"><span>1/64</span></label>
+            <label><input type="radio" name="note" value="1/32" checked><span>1/32</span></label>
+            <label><input type="radio" name="note" value="1/16"><span>1/16</span></label>
+            <label><input type="radio" name="note" value="custom"><span>Custom ms</span></label>
+          </div>
+          <p class="hint" id="note-hint"></p>
+          <div class="custom" id="custom-ms-wrap" hidden>
+            <label class="label" for="custom-ms">Pre-delay in ms</label>
+            <input id="custom-ms" class="field" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="40">
+          </div>
+        </div>
+
+        <div class="opt" id="opt-feel">
+          <span class="label" id="lbl-feel">Feel</span>
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-feel" id="seg-feel" style="--n:3;--i:0">
+            <span class="thumb" aria-hidden="true"></span>
+            <label><input type="radio" name="feel" value="straight" checked><span>Straight</span></label>
+            <label><input type="radio" name="feel" value="dotted"><span>Dotted</span></label>
+            <label><input type="radio" name="feel" value="triplet"><span>Triplet</span></label>
+          </div>
+        </div>
+
+        <div class="opt">
+          <span class="label" id="lbl-beats">Decay beats</span>
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-beats" id="seg-beats" style="--n:4;--i:1">
+            <span class="thumb" aria-hidden="true"></span>
+            <label><input type="radio" name="beats" value="2"><span>2</span></label>
+            <label><input type="radio" name="beats" value="3" checked><span>3</span></label>
+            <label><input type="radio" name="beats" value="4"><span>4</span></label>
+            <label><input type="radio" name="beats" value="custom"><span>Custom</span></label>
+          </div>
+          <div class="custom" id="custom-beats-wrap" hidden>
+            <label class="label" for="custom-beats">Beats (0.5 to 8, in halves)</label>
+            <input id="custom-beats" class="field" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" placeholder="3.5">
+          </div>
+        </div>
+      </section>
+
+      <section class="card panel" aria-labelledby="songs-title">
+        <h2 class="section-title" id="songs-title">Saved songs</h2>
+        <p class="note" id="storage-note" hidden><i class="dot" aria-hidden="true"></i><span>Storage is blocked in this browser, so songs and settings are only kept until you close this tab.</span></p>
+        <form class="save-row" id="save-form">
+          <label class="sr-only" for="song-name">Song name</label>
+          <input id="song-name" class="field" type="text" maxlength="40" autocomplete="off" placeholder="Song name">
+          <button type="submit" class="btn secondary" id="save-song">Save</button>
+        </form>
+        <p class="hint" id="songs-status" aria-live="polite"></p>
+        <ul class="rows" id="song-list"></ul>
+        <p class="hint" id="songs-empty">No saved songs yet. Set a BPM, then save it here.</p>
+      </section>
+
+      <details class="card disclosure" id="units-details">
+        <summary><span>My reverb units</span><svg class="chev-d" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+        <div class="disc-body">
+          <p class="hint">Add your own device limits. They appear in the unit picker at the top.</p>
+          <ul class="rows" id="unit-list"></ul>
+          <button type="button" class="btn secondary" id="unit-add">Add a unit</button>
+          <form class="unit-form" id="unit-form" novalidate hidden>
+            <div class="form-field wide">
+              <label class="label" for="unit-name">Name</label>
+              <input id="unit-name" class="field" type="text" maxlength="40" autocomplete="off" placeholder="Yamaha CL5">
+            </div>
+            <div class="form-field"><label class="label" for="u-pre-min">Pre-delay min (ms)</label><input id="u-pre-min" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <div class="form-field"><label class="label" for="u-pre-max">Pre-delay max (ms)</label><input id="u-pre-max" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <div class="form-field"><label class="label" for="u-pre-step">Pre-delay step (ms)</label><input id="u-pre-step" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <div class="form-field"><label class="label" for="u-dec-min">Decay min (s)</label><input id="u-dec-min" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <div class="form-field"><label class="label" for="u-dec-max">Decay max (s)</label><input id="u-dec-max" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <div class="form-field"><label class="label" for="u-dec-step">Decay step (s)</label><input id="u-dec-step" class="field" type="text" inputmode="decimal" autocomplete="off"></div>
+            <p class="msg error wide" id="unit-error" aria-live="polite"></p>
+            <div class="btn-row wide">
+              <button type="submit" class="btn primary" id="unit-save">Save unit</button>
+              <button type="button" class="btn secondary" id="unit-cancel">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      <details class="card disclosure" id="explainer">
+        <summary><span>How it works</span><svg class="chev-d" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+        <div class="disc-body">
+          <ul class="plain">
+            <li>One beat in ms = 60,000 ÷ BPM</li>
+            <li>Pre-delay = a small slice of a beat</li>
+            <li>Decay = 2–4 beats so the tail ends before the next phrase</li>
+            <li>Most devices measure decay as RT60, so tune by ear</li>
+          </ul>
+        </div>
+      </details>
+
+      <details class="card disclosure" id="settings">
+        <summary><span>Settings</span><svg class="chev-d" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+        <div class="disc-body">
+          <div class="set-row">
+            <span id="lbl-starting">Starting points – tune by ear</span>
+            <button type="button" class="switch" id="starting-switch" role="switch" aria-checked="true" aria-labelledby="lbl-starting"><span class="knob"></span></button>
+          </div>
+          <div class="set-row">
+            <label for="longtail" id="lbl-longtail">Long-tail warning above</label>
+            <div class="inline"><input id="longtail" class="field small" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off"><span class="suffix">s</span></div>
+          </div>
+          <div class="set-row">
+            <span id="lbl-glass">Reduce glass</span>
+            <button type="button" class="switch" id="glass-switch" role="switch" aria-checked="false" aria-labelledby="lbl-glass"><span class="knob"></span></button>
+          </div>
+          <div class="set-row" id="wake-row" hidden>
+            <span id="lbl-wake">Keep screen awake</span>
+            <button type="button" class="switch" id="wake-switch" role="switch" aria-checked="false" aria-labelledby="lbl-wake"><span class="knob"></span></button>
+          </div>
+          <p class="hint" id="wake-msg" aria-live="polite"></p>
+
+          <div class="backup">
+            <span class="label">Back up</span>
+            <p class="hint">Songs and custom units stay on this device. Export a file to move them to another one.</p>
+            <div class="btn-row">
+              <button type="button" class="btn secondary" id="export-btn">Export</button>
+              <button type="button" class="btn secondary" id="import-btn">Import</button>
+            </div>
+            <input type="file" id="import-file" accept=".json,application/json" hidden>
+            <p class="hint" id="backup-msg" aria-live="polite"></p>
+            <div class="confirm" id="import-confirm" role="alertdialog" aria-labelledby="import-confirm-text" hidden>
+              <p id="import-confirm-text"></p>
+              <div class="btn-row">
+                <button type="button" class="btn primary" id="import-add">Add to mine</button>
+                <button type="button" class="btn secondary" id="import-replace">Replace mine</button>
+                <button type="button" class="btn secondary" id="import-cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <aside class="card tip" id="install-tip" role="note" hidden>
+        <p class="tip-text" id="install-text"></p>
+        <button type="button" class="btn secondary tip-install" id="install-btn" hidden>Install</button>
+        <button type="button" class="icon-btn tip-close" id="install-close" aria-label="Dismiss install tip">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+        </button>
+      </aside>
+
+      <div class="foot">
+        <p class="version" id="version"></p>
+      </div>
+    </div>
+  </main>
+
+  <div class="update-wrap" aria-live="polite">
+    <button type="button" class="card update-bar" id="update-bar" hidden>Update ready – tap to refresh</button>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
