@@ -26,7 +26,7 @@ export const X32 = {
   name: 'Behringer X32 / Midas M32',
   preDelay: { minMs: 0, maxMs: 200, stepMs: 1 },
   decay: { minS: 0.2, maxS: 5.0, stepS: 0.01 },
-  notes: 'Console decay is an RT60 approximation. Check the Plate/Hall Reverb screen on your console.',
+  notes: 'RT60-style decay. Verify on the Reverb screen.',
   verified: false,
 };
 

@@ -1,5 +1,5 @@
 // Bump CACHE on every release (see README). The page shows "Update ready" once the new worker is waiting.
-const CACHE = 'reverb-calc-v2';
+const CACHE = 'reverb-calc-v6';
 const FONT_CACHE = 'reverb-calc-fonts';
 
 const APP_FILES = [

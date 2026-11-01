@@ -4,6 +4,14 @@ Enter a song's BPM and get the **pre-delay (ms)** and **decay (s)** to type into
 
 Plain HTML, CSS and JavaScript. No framework, no build step, no runtime dependencies, no accounts, no analytics.
 
+## Using it
+
+- **Tap the big coral dial** along with the song, or press **−** and **+**, or tap a tempo chip.
+- **Type** opens a built-in number pad (on a keyboard, just type digits). Done keeps the tempo; a half-typed value goes back to the last good one.
+- **Pre-delay** and **Decay** each have a ‹ › stepper right under the number: tighter or roomier pre-delay, fewer or more beats of decay. Tap a number to copy it; the copy button copies both.
+- Tap the small unit next to the decay number to switch between seconds and milliseconds.
+- Saved songs, your own reverb units, note feel and settings are one scroll down.
+
 ## Run it locally
 
 The app uses JavaScript modules and a service worker, which browsers block on `file://`, so serve the folder:

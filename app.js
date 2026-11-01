@@ -5,7 +5,7 @@ import {
   sanitizeProfileList, buildBackup, parseBackup, mergeBackup,
 } from './store.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '2.2.0';
 const STORAGE_KEY = 'reverb-calc-v1';
 const TIP_KEY = 'reverb-calc-tip-dismissed';
 const CHIP_BPMS = [60, 72, 80, 90, 100, 110, 120, 130, 140];
@@ -129,6 +129,7 @@ function formatDecay(r, profile) {
 
 /* ---------- render ---------- */
 let lastCopy = null;
+let warnOpen = false;
 
 function setText(el, text) {
   if (el.textContent === text) return;
@@ -142,7 +143,8 @@ function render() {
 
   // profile note + badge
   $('profile-badge').hidden = profile.verified;
-  $('profile-notes').textContent = profile.notes;
+  // Generic's note adds nothing, so only units with something to say get the extra line.
+  $('profile-notes').textContent = profile.id === 'generic' ? '' : profile.notes;
 
   // chips
   const bpmNum = parseNumber(state.bpm);
@@ -151,10 +153,8 @@ function render() {
   });
 
   // options
-  setSeg('seg-note', 'note', state.note);
+  renderSteppers();
   setSeg('seg-feel', 'feel', state.feel);
-  setSeg('seg-beats', 'beats', state.beats);
-  setSeg('seg-units', 'units', state.units);
   $('custom-ms-wrap').hidden = state.note !== 'custom';
   $('custom-beats-wrap').hidden = state.beats !== 'custom';
   const feelOff = state.note === 'custom';
@@ -166,21 +166,26 @@ function render() {
 
   const msg = $('bpm-msg');
   msg.classList.remove('error');
-  const warnings = [];
   lastCopy = null;
+  let hasAlert = false;
+  const alerts = [];
+  const capped = [];
 
   if (c.status !== 'ok') {
     // The empty hint lives in the card so the first screen doesn't grow by a line.
-    msg.textContent = c.status === 'empty' ? '' : c.reason;
-    if (c.status === 'invalid') msg.classList.add('error');
+    // While typing on the pad, a half-typed "7" isn't an error yet.
+    const typing = kpOpen || Date.now() - lastTypedAt < 1500;
+    msg.textContent = flashMsg || (c.status === 'empty' || typing ? '' : c.reason);
+    if (c.status === 'invalid' && !typing) msg.classList.add('error');
     setText($('pre-num'), '–');
     setText($('dec-num'), '–');
     $('dec-unit').textContent = state.units;
     $('pre-sub').textContent = c.status === 'empty' ? 'Type a BPM or tap the tempo.' : 'Waiting for a BPM.';
     $('dec-sub').textContent = 'Waiting for a BPM.';
   } else {
-    msg.textContent = '';
+    msg.textContent = flashMsg;
     const { r } = c;
+    hasAlert = r.preDelay.clamped || r.decay.clamped || r.decay.longTail;
     const bpmText = trimmed(r.bpm);
 
     // pre-delay
@@ -191,11 +196,10 @@ function render() {
         ? 'Custom pre-delay'
         : `${r.preDelay.feel === 'straight' ? '' : cap(r.preDelay.feel) + ' '}${r.preDelay.fraction} note at ${bpmText} BPM`;
       const exact = state.note === 'custom' ? '' : ` · exact ${trimmed(r.preDelay.ms)} ms`;
-      setSub($('pre-sub'), word + exact, r.preDelay.clamped);
-      if (r.preDelay.clamped) {
-        const dir = r.preDelay.original > r.preDelay.msRounded ? 'higher' : 'lower';
-        warnings.push({ text: `Capped to ${preText} ms – this device can't go ${dir}.` });
-      }
+      // Warnings sit inside the card they explain, so they can never push the dock off the screen.
+      const preDir = r.preDelay.original > r.preDelay.msRounded ? 'higher' : 'lower';
+      setSub($('pre-sub'), word + exact, r.preDelay.clamped && 'Capped');
+      if (r.preDelay.clamped) capped.push({ value: `${preText} ms`, dir: preDir });
       lastCopy = { pre: `${preText} ms` };
     } else {
       setText($('pre-num'), '–');
@@ -209,14 +213,14 @@ function render() {
       $('dec-unit').textContent = state.units;
       const beatsN = r.decay.beats;
       const exactS = Math.abs(r.decay.s - r.decay.sRounded) > 0.0005 ? ` · exact ${trimmed(r.decay.s, 3)} s` : '';
-      setSub($('dec-sub'), `${trimmed(beatsN)} ${beatsN === 1 ? 'beat' : 'beats'} at ${bpmText} BPM${exactS}`, r.decay.clamped);
-      if (r.decay.clamped) {
-        const dir = r.decay.original > r.decay.sRounded ? 'higher' : 'lower';
-        warnings.push({ text: `Capped to ${decText} ${state.units} – this device can't go ${dir}.` });
-      }
-      if (r.decay.longTail) {
-        warnings.push({ text: 'Long tail for a reverberant room. Try 2 beats, or keep the return fader low.' });
-      }
+      const decDir = r.decay.original > r.decay.sRounded ? 'higher' : 'lower';
+      setSub(
+        $('dec-sub'),
+        `${trimmed(beatsN)} ${beatsN === 1 ? 'beat' : 'beats'} at ${bpmText} BPM${exactS}`,
+        r.decay.clamped && 'Capped',
+      );
+      if (r.decay.clamped) capped.push({ value: `${decText} ${state.units}`, dir: decDir });
+      if (r.decay.longTail) alerts.push('Long tail for a reverberant room. Try 2 beats, or keep the return fader low.');
       lastCopy = { ...(lastCopy || {}), dec: `${decText} ${state.units}` };
     } else {
       setText($('dec-num'), '–');
@@ -225,21 +229,43 @@ function render() {
     }
   }
 
-  // warnings
+  // Every cap in one sentence, then the long-tail notice, as slim banners under the results.
+  if (capped.length) {
+    const sameWay = capped.every((c) => c.dir === capped[0].dir);
+    alerts.unshift(sameWay
+      ? `Capped to ${capped.map((c) => c.value).join(' and ')} – this device can't go ${capped[0].dir}.`
+      : capped.map((c) => `Capped to ${c.value} – this device can't go ${c.dir}.`).join(' '));
+  }
   const box = $('warnings');
   box.textContent = '';
-  for (const w of warnings) {
+  box.classList.toggle('open', warnOpen);
+  if (alerts.length) {
+    // On short screens the banners collapse into this pill so the dial and Tap tempo never leave the screen.
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'warn-pill';
+    pill.setAttribute('aria-expanded', String(warnOpen));
+    const pillDot = document.createElement('i');
+    pillDot.className = 'dot';
+    pillDot.setAttribute('aria-hidden', 'true');
+    pill.append(pillDot, document.createTextNode(`${alerts.length} warning${alerts.length === 1 ? '' : 's'}`));
+    pill.addEventListener('click', () => { warnOpen = !warnOpen; render(); });
+    box.append(pill);
+  }
+  for (const text of alerts) {
     const div = document.createElement('div');
-    div.className = 'banner card';
+    div.className = 'banner';
     const dot = document.createElement('i');
     dot.className = 'dot';
     dot.setAttribute('aria-hidden', 'true');
     const p = document.createElement('p');
-    p.style.margin = '0';
-    p.textContent = w.text;
+    p.textContent = text;
     div.append(dot, p);
     box.append(div);
   }
+
+  // With a warning on show the numbers shrink a little, so the dock never leaves the screen.
+  document.querySelector('.stage').classList.toggle('has-alert', hasAlert);
 
   // copy buttons
   $('copy-pre').disabled = !(lastCopy && lastCopy.pre);
@@ -247,6 +273,23 @@ function render() {
   $('copy-both').disabled = !(lastCopy && lastCopy.pre && lastCopy.dec);
   document.querySelectorAll('.icon-btn:disabled, .btn:disabled').forEach((b) => { b.style.opacity = '0.4'; });
   document.querySelectorAll('.icon-btn:not(:disabled), .btn:not(:disabled)').forEach((b) => { b.style.opacity = ''; });
+
+  // decay unit toggle, the beat light, and the number pad readout
+  const unitBtn = $('dec-unit');
+  unitBtn.textContent = state.units;
+  unitBtn.setAttribute('aria-label', state.units === 's' ? 'Decay shown in seconds. Switch to milliseconds.' : 'Decay shown in milliseconds. Switch to seconds.');
+  const tempo = validateBpm(state.bpm);
+  const beat = $('beat');
+  beat.classList.toggle('off', !tempo.ok);
+  // Above 180 BPM it blinks every second beat, so it never flashes faster than about 3 times a second.
+  if (tempo.ok) beat.style.setProperty('--beat', `${((60 / tempo.bpm) * (tempo.bpm > 180 ? 2 : 1)).toFixed(3)}s`);
+  $('kp-value').textContent = state.bpm || '–';
+  $('bpm-text').textContent = state.bpm || '–';
+  for (const id of ['pre-value', 'dec-value']) {
+    const numText = $(id === 'pre-value' ? 'pre-num' : 'dec-num').textContent;
+    $(id).classList.toggle('long', numText.length >= 5);
+  }
+  centerActiveChip();
 
   // reduce glass
   document.documentElement.classList.toggle('reduce-glass', state.reduceGlass);
@@ -256,14 +299,48 @@ function render() {
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
-function setSub(el, text, clamped) {
+function setSub(el, text, flag) {
   el.textContent = text;
-  if (clamped) {
+  if (flag) {
     const span = document.createElement('span');
     span.className = 'cap';
     span.textContent = ' · capped';
     el.append(span);
   }
+}
+
+/* ---------- steppers: ‹ value › for the pre-delay note and decay beats ---------- */
+const NOTE_ORDER = ['1/64', '1/32', '1/16', 'custom'];
+const BEATS_ORDER = ['2', '3', '4', 'custom'];
+function renderSteppers() {
+  const ni = NOTE_ORDER.indexOf(state.note);
+  const bi = BEATS_ORDER.indexOf(state.beats);
+  $('note-value').textContent = state.note === 'custom' ? 'Custom' : state.note;
+  $('beats-value').textContent = state.beats === 'custom' ? 'Custom' : `${state.beats} beats`;
+  $('note-prev').disabled = ni <= 0;
+  $('note-next').disabled = ni >= NOTE_ORDER.length - 1;
+  $('beats-prev').disabled = bi <= 0;
+  $('beats-next').disabled = bi >= BEATS_ORDER.length - 1;
+}
+function stepOption(key, order, delta) {
+  const i = order.indexOf(state[key]) + delta;
+  if (i < 0 || i >= order.length) return;
+  state[key] = order[i];
+  saveState();
+  render();
+}
+$('note-prev').addEventListener('click', () => stepOption('note', NOTE_ORDER, -1));
+$('note-next').addEventListener('click', () => stepOption('note', NOTE_ORDER, 1));
+$('beats-prev').addEventListener('click', () => stepOption('beats', BEATS_ORDER, -1));
+$('beats-next').addEventListener('click', () => stepOption('beats', BEATS_ORDER, 1));
+
+// Keep the chosen tempo chip in the middle of the strip, so the strip stays balanced around it.
+function centerActiveChip() {
+  const strip = $('chips');
+  const active = strip.querySelector('.chip[aria-pressed="true"]');
+  if (!active) return;
+  const target = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
+  strip.scrollTo({ left: Math.max(0, target), behavior: reducedMotion() ? 'auto' : 'smooth' });
 }
 
 function setSeg(id, name, value) {
@@ -283,21 +360,97 @@ function setBpm(value) {
   render();
 }
 
-$('bpm').addEventListener('input', (e) => {
-  const clean = sanitizeNumber(e.target.value);
-  if (clean !== e.target.value) e.target.value = clean;
+/* BPM entry. On touch screens the built-in number pad opens so the phone keyboard never covers the
+   results. With a physical keyboard you can just click the number and type. */
+let kpOpen = false;
+let kpFresh = true; // the next key replaces the whole value, like selecting it first
+let bpmBeforePad = '';
+let flashMsg = '';
+
+function bpmAfterKey(cur, key, fresh) {
+  if (key === 'back') return cur.slice(0, -1);
+  if (key === '.') {
+    if (fresh || cur === '') return '0.';
+    return cur.includes('.') ? cur : `${cur}.`;
+  }
+  const next = (fresh ? '' : cur) + key;
+  const [whole, decimals = ''] = next.split('.');
+  return whole.length > 3 || decimals.length > 2 ? cur : next;
+}
+function pressKey(key) {
+  const next = bpmAfterKey(state.bpm, key, kpFresh);
+  kpFresh = false;
   resetTaps();
-  state.bpm = clean;
-  saveState();
+  setBpm(next);
+}
+
+function openKeypad() {
+  if (kpOpen) return;
+  kpOpen = true;
+  document.documentElement.classList.add('kp-open');
+  kpFresh = true;
+  bpmBeforePad = state.bpm;
+  const pad = $('keypad');
+  pad.hidden = false;
+  requestAnimationFrame(() => pad.classList.add('open'));
   render();
+}
+function closeKeypad() {
+  if (!kpOpen) return;
+  kpOpen = false;
+  document.documentElement.classList.remove('kp-open');
+  const pad = $('keypad');
+  pad.classList.remove('open');
+  setTimeout(() => { if (!kpOpen) pad.hidden = true; }, reducedMotion() ? 0 : 260);
+  // A half-typed value (like "7") goes back to the last good tempo instead of leaving results blank.
+  if (state.bpm !== '' && !validateBpm(state.bpm).ok) {
+    state.bpm = validateBpm(bpmBeforePad).ok ? bpmBeforePad : '';
+    $('bpm').value = state.bpm;
+    saveState();
+    flashMsg = `BPM must be between ${BPM_MIN} and ${BPM_MAX}.`;
+    setTimeout(() => { flashMsg = ''; render(); }, 2500);
+  }
+  render();
+}
+
+function handleBpmKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  if (/^[0-9]$/.test(k)) pressKey(k);
+  else if (k === '.' || k === ',') pressKey('.');
+  else if (k === 'Backspace' || k === 'Delete') pressKey('back');
+  else if (k === 'ArrowUp') stepBpm(1);
+  else if (k === 'ArrowDown') stepBpm(-1);
+  else if (k === 'Enter' || k === 'Escape') { closeKeypad(); if (k === 'Enter') $('bpm').blur(); }
+  else return;
+  e.preventDefault();
+}
+let lastTypedAt = 0;
+document.addEventListener('keydown', (e) => {
+  if (kpOpen) { handleBpmKey(e); return; }
+  // With a keyboard, digits typed while nothing else is focused go straight to the tempo.
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!/^[0-9.]$/.test(e.key)) return;
+  const now = Date.now();
+  kpFresh = now - lastTypedAt > 1500;
+  lastTypedAt = now;
+  pressKey(e.key);
+  setTimeout(render, 1600); // show the range message once the typing pause is over
+  e.preventDefault();
 });
-$('bpm').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
-$('bpm').addEventListener('focus', (e) => e.target.select());
+$('type-btn').addEventListener('click', () => { kpFresh = true; openKeypad(); });
+document.querySelectorAll('.kp-key').forEach((b) => b.addEventListener('click', () => { buzz(); pressKey(b.dataset.k); }));
+$('kp-done').addEventListener('click', closeKeypad);
+document.addEventListener('pointerdown', (e) => {
+  if (kpOpen && !e.target.closest('#keypad') && !e.target.closest('#type-btn')) closeKeypad();
+});
 
 function stepBpm(delta) {
   const cur = parseNumber(state.bpm);
   let next = cur === null ? 120 : cur + delta;
   next = Math.min(BPM_MAX, Math.max(BPM_MIN, next));
+  kpFresh = true;
   resetTaps();
   setBpm(String(Number(next.toFixed(1))));
 }
@@ -323,12 +476,23 @@ holdRepeat($('bpm-plus'), 1);
 let taps = [];
 function resetTaps() {
   taps = [];
-  $('tap-bpm').hidden = true;
+  $('tap-cap').textContent = 'Tap tempo';
 }
-const buzz = () => { try { navigator.vibrate?.(10); } catch { /* not supported */ } };
+// Only buzz right after a real touch; browsers log an error for vibration without one.
+const buzz = () => {
+  try {
+    if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    navigator.vibrate?.(10);
+  } catch { /* not supported */ }
+};
 
 $('tap').addEventListener('click', () => {
   buzz();
+  kpFresh = true;
+  const pad = $('tap');
+  pad.classList.remove('hit');
+  void pad.offsetWidth; // restart the flash on every tap
+  pad.classList.add('hit');
   const now = performance.now();
   if (taps.length && now - taps[taps.length - 1] > 2000) taps = [];
   taps.push(now);
@@ -336,8 +500,7 @@ $('tap').addEventListener('click', () => {
   if (taps.length < 2) return;
   const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
   const bpm = Math.round((60000 / avg) * 2) / 2;
-  $('tap-bpm').textContent = trimmed(bpm, 1);
-  $('tap-bpm').hidden = false;
+  $('tap-cap').textContent = `Detected ${trimmed(bpm, 1)}`;
   setBpm(String(bpm));
 });
 
@@ -360,7 +523,7 @@ for (const n of CHIP_BPMS) {
   b.dataset.bpm = String(n);
   b.textContent = String(n);
   b.setAttribute('aria-pressed', 'false');
-  b.addEventListener('click', () => { resetTaps(); setBpm(String(n)); });
+  b.addEventListener('click', () => { kpFresh = true; resetTaps(); setBpm(String(n)); });
   chipBox.append(b);
 }
 
@@ -386,10 +549,14 @@ function onRadio(name, key) {
     i.addEventListener('change', () => { if (i.checked) { state[key] = i.value; saveState(); render(); } });
   });
 }
-onRadio('note', 'note');
 onRadio('feel', 'feel');
-onRadio('beats', 'beats');
-onRadio('units', 'units');
+
+// Tap the unit next to the decay number to flip between seconds and milliseconds.
+$('dec-unit').addEventListener('click', () => {
+  state.units = state.units === 's' ? 'ms' : 's';
+  saveState();
+  render();
+});
 
 function bindNumberField(id, key) {
   const el = $(id);
@@ -430,10 +597,10 @@ async function copyText(text) {
 function flashCopied(btn, label) {
   btn.classList.add('is-copied');
   const prev = label ? label.textContent : null;
-  if (label) label.textContent = 'Copied';
+  if (label) { label.textContent = 'Copied'; label.classList.add('is-copied'); }
   setTimeout(() => {
     btn.classList.remove('is-copied');
-    if (label) label.textContent = prev;
+    if (label) { label.textContent = prev; label.classList.remove('is-copied'); }
   }, 1400);
 }
 
@@ -445,9 +612,15 @@ function wireCopy(btnId, getText, labelEl) {
     if (await copyText(text)) { buzz(); flashCopied(btn, labelEl); }
   });
 }
-wireCopy('copy-pre', () => lastCopy && lastCopy.pre);
-wireCopy('copy-dec', () => lastCopy && lastCopy.dec);
+wireCopy('copy-pre', () => lastCopy && lastCopy.pre, $('copy-caption'));
+wireCopy('copy-dec', () => lastCopy && lastCopy.dec, $('copy-caption'));
 wireCopy('copy-both', () => (lastCopy && lastCopy.pre && lastCopy.dec ? `Pre-Delay ${lastCopy.pre} | Decay ${lastCopy.dec}` : null), $('copy-both-label'));
+
+
+/* ---------- scroll to the extras ---------- */
+$('more-link').addEventListener('click', () => {
+  $('more').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
+});
 
 /* ---------- settings ---------- */
 function bindSwitch(id, key) {
