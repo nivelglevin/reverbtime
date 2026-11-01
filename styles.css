@@ -46,7 +46,7 @@ button { cursor: pointer; }
 }
 
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.label { margin: 0; font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--label); }
+.label { margin: 0; font-size: 14px; line-height: 1.2; font-weight: 600; color: var(--label); }
 
 /* ---------- glass ---------- */
 .card, .keypad {
@@ -129,7 +129,7 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
   background: radial-gradient(110% 85% at 50% 0%, rgba(255,74,46,0.20), transparent 72%);
   border-left: 1px solid rgba(230,231,232,0.12);
 }
-.hero-foot { grid-column: 1 / -1; margin: 0; padding: 2px 0 12px; text-align: center; font-size: 13px; color: var(--label); }
+.hero-foot { grid-column: 1 / -1; margin: 0; padding: 2px 0 12px; text-align: center; font-size: 14px; color: var(--label); }
 .hero-foot.is-copied { color: var(--accent); font-weight: 600; }
 
 .value {
@@ -156,11 +156,10 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
 .unit { font-size: 0.34em; font-weight: 600; color: var(--text-muted); letter-spacing: 0; }
 /* Looks like a unit label; a dotted underline and a generous touch area say it can be tapped. */
 .unit-btn {
-  position: relative; background: none; border: 0; padding: 0; box-shadow: none; font-family: inherit;
-  text-decoration: underline dotted; text-underline-offset: 0.22em; text-decoration-thickness: 2px;
-  text-decoration-color: rgba(255,138,107,0.8); touch-action: manipulation;
+  position: relative; font-family: inherit; touch-action: manipulation; line-height: 1.3;
+  padding: 1px 9px 2px; border-radius: var(--r-pill); color: var(--text);
+  background: rgba(255,74,46,0.16); border: 1px solid rgba(255,138,107,0.5); box-shadow: none;
 }
-.unit-btn { padding: 0 8px; }
 .unit-btn::before { content: ""; position: absolute; inset: -14px -14px -14px -2px; } /* a 46px touch area that doesn't steal taps from the number */
 
 /* ‹ value › : one tidy control instead of four cramped pills */
@@ -171,10 +170,10 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
 }
 .step:disabled { opacity: 0.25; cursor: default; }
 .step::before { content: ""; position: absolute; inset: calc((44px - var(--step)) / -2); } /* keeps the touch area at 44px */
-.step-value { padding-inline: 7px; font-size: 15px; font-weight: 700; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.step-value { padding-inline: 7px; font-size: 16px; font-weight: 700; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .custom-inline { display: grid; justify-items: center; gap: 4px; margin-top: 4px; }
 .custom-inline .field { width: 116px; min-height: 44px; font-size: 20px; text-align: center; padding: 0 10px; }
-.sub { margin: 4px 0 0; font-size: 13px; line-height: 1.3; color: var(--text-muted); min-height: 1.3em; }
+.sub { margin: 4px 0 0; font-size: 14px; line-height: 1.3; color: var(--text-muted); min-height: 1.3em; }
 .sub .cap { color: var(--warn); font-weight: 600; }
 
 /* ---------- warnings ---------- */
@@ -235,8 +234,8 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
 .orb.hit::after { animation: tap-flash 480ms var(--ease); }
 @keyframes tap-flash { from { opacity: 0.95; transform: scale(0.4); } to { opacity: 0; transform: scale(1.3); } }
 .orb-num { font-size: calc(var(--orb) * 0.37); line-height: 1; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.orb-unit { margin-top: 2px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.7; }
-.orb-cap { margin-top: 8px; font-size: 12px; font-weight: 700; opacity: 0.92; }
+.orb-unit { margin-top: 2px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.7; }
+.orb-cap { margin-top: 8px; font-size: 13px; font-weight: 700; opacity: 0.92; }
 /* A ring that expands at the tempo. */
 .beat {
   position: absolute; inset: -3px; border-radius: 50%; pointer-events: none; z-index: 1;
@@ -247,7 +246,7 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
 
 .trio { display: grid; grid-template-columns: repeat(3, auto); justify-content: center; column-gap: 40px; }
 .trio-item { display: grid; justify-items: center; gap: 4px; }
-.trio-cap { font-size: 12px; font-weight: 600; color: var(--label); }
+.trio-cap { font-size: 13px; font-weight: 600; color: var(--label); }
 
 .icon-btn {
   width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; padding: 0;
@@ -580,3 +579,12 @@ h1 { margin: 0; font-size: var(--h1); line-height: 1.1; font-weight: 700; letter
   .orb-unit, .orb-cap { font-size: 14px; }
   .subtitle { font-size: 17px; }
 }
+
+/* A quiet credit at the very bottom. */
+.credit { margin: 0; font-size: 14px; color: var(--text-muted); letter-spacing: 0.01em; }
+.credit strong { font-weight: 700; color: var(--text); letter-spacing: 0.04em; }
+.foot { gap: 4px; }
+
+/* The dial's number: decimals sit smaller beside the whole number, and long values shrink a little. */
+.orb-num .dec { font-size: 0.55em; font-weight: 700; letter-spacing: 0; margin-left: 1px; opacity: 0.9; }
+.orb-num.long { font-size: calc(var(--orb) * 0.31); }

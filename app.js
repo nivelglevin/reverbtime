@@ -5,7 +5,7 @@ import {
   sanitizeProfileList, buildBackup, parseBackup, mergeBackup,
 } from './store.js';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 const STORAGE_KEY = 'reverb-calc-v1';
 const TIP_KEY = 'reverb-calc-tip-dismissed';
 const CHIP_BPMS = [60, 72, 80, 90, 100, 110, 120, 130, 140];
@@ -192,13 +192,11 @@ function render() {
     if (c.preValid) {
       const preText = formatPreDelay(r, profile);
       setText($('pre-num'), preText);
-      const word = state.note === 'custom'
-        ? 'Custom pre-delay'
-        : `${r.preDelay.feel === 'straight' ? '' : cap(r.preDelay.feel) + ' '}${r.preDelay.fraction} note at ${bpmText} BPM`;
-      const exact = state.note === 'custom' ? '' : ` · exact ${trimmed(r.preDelay.ms)} ms`;
+      const feelWord = r.preDelay.feel === 'straight' ? '' : `${cap(r.preDelay.feel)} · `;
+      const detail = state.note === 'custom' ? 'Custom pre-delay' : `${feelWord}exact ${trimmed(r.preDelay.ms)} ms`;
       // Warnings sit inside the card they explain, so they can never push the dock off the screen.
       const preDir = r.preDelay.original > r.preDelay.msRounded ? 'higher' : 'lower';
-      setSub($('pre-sub'), word + exact, r.preDelay.clamped && 'Capped');
+      setSub($('pre-sub'), detail, r.preDelay.clamped && 'Capped');
       if (r.preDelay.clamped) capped.push({ value: `${preText} ms`, dir: preDir });
       lastCopy = { pre: `${preText} ms` };
     } else {
@@ -212,11 +210,11 @@ function render() {
       setText($('dec-num'), decText);
       $('dec-unit').textContent = state.units;
       const beatsN = r.decay.beats;
-      const exactS = Math.abs(r.decay.s - r.decay.sRounded) > 0.0005 ? ` · exact ${trimmed(r.decay.s, 3)} s` : '';
+      const exactDecay = state.units === 'ms' ? `${trimmed(r.decay.s * 1000, 1)} ms` : `${trimmed(r.decay.s, 3)} s`;
       const decDir = r.decay.original > r.decay.sRounded ? 'higher' : 'lower';
       setSub(
         $('dec-sub'),
-        `${trimmed(beatsN)} ${beatsN === 1 ? 'beat' : 'beats'} at ${bpmText} BPM${exactS}`,
+        `exact ${exactDecay}`,
         r.decay.clamped && 'Capped',
       );
       if (r.decay.clamped) capped.push({ value: `${decText} ${state.units}`, dir: decDir });
@@ -284,7 +282,7 @@ function render() {
   // Above 180 BPM it blinks every second beat, so it never flashes faster than about 3 times a second.
   if (tempo.ok) beat.style.setProperty('--beat', `${((60 / tempo.bpm) * (tempo.bpm > 180 ? 2 : 1)).toFixed(3)}s`);
   $('kp-value').textContent = state.bpm || '–';
-  $('bpm-text').textContent = state.bpm || '–';
+  setDial(state.bpm || '–');
   for (const id of ['pre-value', 'dec-value']) {
     const numText = $(id === 'pre-value' ? 'pre-num' : 'dec-num').textContent;
     $(id).classList.toggle('long', numText.length >= 5);
@@ -298,6 +296,22 @@ function render() {
 }
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function setDial(text) {
+  const el = $('bpm-text');
+  if (el.dataset.v === text) return;
+  el.dataset.v = text;
+  el.textContent = '';
+  const [whole, decimals] = text.split('.');
+  el.append(document.createTextNode(whole));
+  if (decimals !== undefined) {
+    const small = document.createElement('span');
+    small.className = 'dec';
+    small.textContent = `.${decimals}`;
+    el.append(small);
+  }
+  el.classList.toggle('long', text.length >= 6);
+}
 
 function setSub(el, text, flag) {
   el.textContent = text;
@@ -1070,12 +1084,17 @@ $('install-btn').addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => { $('install-tip').hidden = true; });
 if (isIos()) showTip('To install: tap Share, then Add to Home Screen.', false);
 
+let swReg = null;
+const updateMsg = (text) => { $('update-msg').textContent = text; };
+
 if ('serviceWorker' in navigator) {
   let reloading = false;
-  const hadController = !!navigator.serviceWorker.controller;
+  let hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // First install also fires this; only reload when an older version was running.
-    if (!hadController || reloading) return;
+    // The very first install also fires this (no older version was running, so no reload). Every later
+    // change is a real update, even if the app was first opened in this same session.
+    if (!hadController) { hadController = true; return; }
+    if (reloading) return;
     reloading = true;
     location.reload();
   });
@@ -1084,9 +1103,12 @@ if ('serviceWorker' in navigator) {
     const bar = $('update-bar');
     bar.hidden = false;
     bar.onclick = () => worker.postMessage('SKIP_WAITING');
+    updateMsg('An update is ready. Tap the bar at the top of the screen to install it.');
   };
 
-  navigator.serviceWorker.register('./sw.js').then((reg) => {
+  // updateViaCache 'none' makes the browser fetch a fresh sw.js every time instead of trusting a cached copy.
+  navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
+    swReg = reg;
     if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const worker = reg.installing;
@@ -1095,5 +1117,40 @@ if ('serviceWorker' in navigator) {
         if (worker.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(worker);
       });
     });
+
+    // An iPhone home-screen app is usually resumed, not relaunched, and iOS only looks for a new version
+    // on a fresh launch. So ask for one ourselves: now, whenever the app comes back to the front, and every 30 minutes.
+    const check = () => { reg.update().catch(() => { /* offline: try again later */ }); };
+    check();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    window.addEventListener('pageshow', check);
+    setInterval(check, 30 * 60 * 1000);
   }).catch(() => { /* offline support unavailable; the app still works online */ });
+}
+
+$('update-check').addEventListener('click', async () => {
+  if (!swReg) { updateMsg("Updates can't be checked in this browser. Reload the page to get the latest version."); return; }
+  updateMsg('Checking…');
+  try {
+    await swReg.update();
+  } catch {
+    updateMsg("Couldn't check. Are you online?");
+    return;
+  }
+  if (swReg.waiting) { offerUpdateNow(); return; }
+  if (swReg.installing) {
+    updateMsg('Downloading the update…');
+    swReg.installing.addEventListener('statechange', function () {
+      if (this.state === 'installed') offerUpdateNow();
+    });
+    return;
+  }
+  updateMsg(`You're on the latest version (${APP_VERSION}).`);
+});
+function offerUpdateNow() {
+  const worker = swReg && swReg.waiting;
+  if (!worker) return;
+  $('update-bar').hidden = false;
+  $('update-bar').onclick = () => worker.postMessage('SKIP_WAITING');
+  updateMsg('An update is ready. Tap the bar at the top of the screen to install it.');
 }

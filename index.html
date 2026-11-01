@@ -14,6 +14,7 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <title>Reverb Time Calculator</title>
   <meta name="description" content="BPM-synced pre-delay and decay for any reverb.">
+  <meta name="author" content="GLEV">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap">
@@ -250,6 +251,12 @@
           </div>
           <p class="hint" id="wake-msg" aria-live="polite"></p>
 
+          <div class="set-row">
+            <span>App updates</span>
+            <button type="button" class="btn secondary" id="update-check">Check for updates</button>
+          </div>
+          <p class="hint" id="update-msg" aria-live="polite"></p>
+
           <div class="backup">
             <span class="label">Back up</span>
             <p class="hint">Songs and custom units stay on this device. Export a file to move them to another one.</p>
@@ -280,6 +287,7 @@
       </aside>
 
       <div class="foot">
+        <p class="credit">Made by <strong>GLEV</strong></p>
         <p class="version" id="version"></p>
       </div>
     </div>

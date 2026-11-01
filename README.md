@@ -1,5 +1,7 @@
 # Reverb Time Calculator
 
+Made by GLEV.
+
 Enter a song's BPM and get the **pre-delay (ms)** and **decay (s)** to type into any reverb: a mixing console, an outboard unit, or a plugin. Built for volunteer sound operators at front of house, on a phone, in a dim room.
 
 Plain HTML, CSS and JavaScript. No framework, no build step, no runtime dependencies, no accounts, no analytics.
@@ -66,6 +68,8 @@ Browsers keep the old files until the cache name changes.
 4. Deploy.
 
 People who already have the app see "Update ready – tap to refresh" and get the new version when they tap it.
+
+The app looks for a new version every time it is opened or brought back to the front, and every 30 minutes. There is also **Settings, then Check for updates**, and the footer shows the version number so you can tell what a phone is running. If a phone is stuck on an old version, close the app completely (swipe it away in the app switcher) and open it again while online.
 
 ## Icons
 
