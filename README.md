@@ -1,4 +1,4 @@
-# Reverb Time Calculator
+# Reverb Time
 
 Made by GLEV.
 
@@ -77,13 +77,13 @@ The app looks for a new version every time it is opened or brought back to the f
 
 ## Deploy to GitHub Pages
 
-The app uses relative paths only, so it works from a sub-folder such as `https://<user>.github.io/reverb-calculator/`. The empty `.nojekyll` file stops GitHub from processing the files.
+The app uses relative paths only, so it works from a sub-folder such as `https://<user>.github.io/reverbtime/`. The empty `.nojekyll` file stops GitHub from processing the files.
 
-1. Create a public repository named `reverb-calculator` on github.com.
-2. In this folder, run `git init`, `git add .`, then `git commit -m "Reverb Time Calculator v1"`.
-3. Run `git branch -M main`, then `git remote add origin https://github.com/<user>/reverb-calculator.git`, then `git push -u origin main`.
+1. Create a public repository named `reverbtime` on github.com.
+2. In this folder, run `git init`, `git add .`, then `git commit -m "Reverb Time v1"`.
+3. Run `git branch -M main`, then `git remote add origin https://github.com/<user>/reverbtime.git`, then `git push -u origin main`.
 4. On GitHub, open Settings, then Pages, choose Deploy from a branch, pick `main` and `/ (root)`, and save.
-5. After a minute or two the app is live at `https://<user>.github.io/reverb-calculator/`.
+5. After a minute or two the app is live at `https://<user>.github.io/reverbtime/`.
 
 To check the live site: load it, go offline and reload, then install it (iPhone: Safari, Share, Add to Home Screen; Windows and macOS: Chrome or Edge, Install).
 

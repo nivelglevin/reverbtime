@@ -1,6 +1,6 @@
 {
-  "name": "Reverb Time Calculator",
-  "short_name": "Reverb Calc",
+  "name": "Reverb Time",
+  "short_name": "Reverb Time",
   "description": "BPM-synced pre-delay and decay for any reverb.",
   "display": "standalone",
   "orientation": "any",

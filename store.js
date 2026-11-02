@@ -121,7 +121,7 @@ export function parseBackup(text) {
     return { ok: false, reason: "That isn't a valid backup file." };
   }
   if (!isPlainObject(data) || data.app !== 'reverb-calc') {
-    return { ok: false, reason: "That doesn't look like a Reverb Time Calculator backup." };
+    return { ok: false, reason: "That doesn't look like a Reverb Time backup." };
   }
   if (data.format !== 1) return { ok: false, reason: 'That backup was made by a different version of the app.' };
   if (!Array.isArray(data.songs) && !Array.isArray(data.profiles)) {

@@ -5,7 +5,7 @@ const root = process.cwd();
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 http.createServer(async (req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
-  const rel = p.replace(/^\/reverb-calc(?=\/|$)/, '') || '/';
+  const rel = p.replace(/^\/(reverb-calc|reverbtime)(?=\/|$)/, '') || '/';
   const file = normalize(join(root, rel === '/' ? 'index.html' : rel));
   if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
   try {
