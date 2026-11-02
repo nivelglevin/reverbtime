@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Reverb Time">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -104,9 +104,9 @@
           <div class="orb-wrap">
             <i class="beat" id="beat" aria-hidden="true"></i>
             <button type="button" class="orb" id="tap" aria-label="Tap tempo. Tap along with the song.">
+              <span class="orb-cap" id="tap-cap" aria-hidden="true">Tap tempo</span>
               <span class="orb-num" id="bpm-text" aria-hidden="true">–</span>
               <span class="orb-unit" aria-hidden="true">BPM</span>
-              <span class="orb-cap" id="tap-cap" aria-hidden="true">Tap tempo</span>
             </button>
           </div>
           <button type="button" class="round" id="bpm-plus" aria-label="Raise BPM by 1">

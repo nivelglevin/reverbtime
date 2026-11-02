@@ -5,7 +5,7 @@ import {
   sanitizeProfileList, buildBackup, parseBackup, mergeBackup,
 } from './store.js';
 
-const APP_VERSION = '2.3.1';
+const APP_VERSION = '2.3.2';
 const STORAGE_KEY = 'reverb-calc-v1';
 const TIP_KEY = 'reverb-calc-tip-dismissed';
 const CHIP_BPMS = [60, 72, 80, 90, 100, 110, 120, 130, 140];
@@ -283,11 +283,8 @@ function render() {
   if (tempo.ok) beat.style.setProperty('--beat', `${((60 / tempo.bpm) * (tempo.bpm > 180 ? 2 : 1)).toFixed(3)}s`);
   $('kp-value').textContent = state.bpm || '–';
   setDial(state.bpm || '–');
-  for (const id of ['pre-value', 'dec-value']) {
-    const numText = $(id === 'pre-value' ? 'pre-num' : 'dec-num').textContent;
-    $(id).classList.toggle('long', numText.length >= 5);
-  }
   centerActiveChip();
+  fitValues();
 
   // reduce glass
   document.documentElement.classList.toggle('reduce-glass', state.reduceGlass);
@@ -296,6 +293,35 @@ function render() {
 }
 
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// Whatever the screen, unit or digits, shrink the two result numbers just enough to fit their halves.
+// Both get the same size, so the card stays symmetrical.
+function fitValues() {
+  const els = ['pre-value', 'dec-value'].map($);
+  els.forEach((el) => { el.style.fontSize = ''; });
+  const base = parseFloat(getComputedStyle(els[0]).fontSize);
+  const sizes = els.map((el) => {
+    const col = el.closest('.result');
+    const cs = getComputedStyle(col);
+    const room = col.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    // Measure the number and its unit themselves (the unit's invisible touch area would otherwise count as overflow).
+    const used = () => {
+      const kids = el.children;
+      return kids[kids.length - 1].getBoundingClientRect().right - kids[0].getBoundingClientRect().left;
+    };
+    let size = base;
+    while (used() > room && size > base * 0.5) {
+      size -= 2;
+      el.style.fontSize = `${size}px`;
+    }
+    return size;
+  });
+  const size = Math.min(...sizes);
+  els.forEach((el) => { el.style.fontSize = size === base ? '' : `${size}px`; });
+}
+let fitTimer = null;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitValues, 80); });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitValues);
 
 function setDial(text) {
   const el = $('bpm-text');
@@ -490,7 +516,6 @@ holdRepeat($('bpm-plus'), 1);
 let taps = [];
 function resetTaps() {
   taps = [];
-  $('tap-cap').textContent = 'Tap tempo';
 }
 // Only buzz right after a real touch; browsers log an error for vibration without one.
 const buzz = () => {
@@ -514,7 +539,6 @@ $('tap').addEventListener('click', () => {
   if (taps.length < 2) return;
   const avg = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
   const bpm = Math.round((60000 / avg) * 2) / 2;
-  $('tap-cap').textContent = `Detected ${trimmed(bpm, 1)}`;
   setBpm(String(bpm));
 });
 
