@@ -5,7 +5,7 @@ import {
   sanitizeProfileList, buildBackup, parseBackup, mergeBackup,
 } from './store.js';
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.3.1';
 const STORAGE_KEY = 'reverb-calc-v1';
 const TIP_KEY = 'reverb-calc-tip-dismissed';
 const CHIP_BPMS = [60, 72, 80, 90, 100, 110, 120, 130, 140];
